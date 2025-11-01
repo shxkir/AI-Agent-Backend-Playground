@@ -34,11 +34,46 @@ This playground helped me understand:
 ---
 ## 📂 Project Structure
 
-- `rust_api/` – Actix-Web gateway
-- `python_ai/` – FastAPI AI microservice with RAG helpers
-- `scripts/` – Convenience launch scripts for local development
-- `docs/` – Architecture notes and design references that document the gateway↔AI flow
-- `langgraph/` – Workspace for future LangGraph-based orchestration experiments
+- `rust_api/` – Actix-Web gateway (`src/main.rs`) that enforces the `X-API-KEY` header, proxies `/api/ask` and `/api/add_doc` to Python, retries failures with exponential backoff, and exposes `/api/health`.
+- `python_ai/` – FastAPI service (`app.py`) with a styled landing page, the public REST endpoints, and RAG helpers in `rag_pipeline.py`. Documents are stored in a persistent ChromaDB directory (`python_ai/chroma_db/`) and embeddings come from `sentence-transformers/all-MiniLM-L6-v2`.
+- `scripts/` – `run_python.sh` bootstraps a virtual environment, installs FastAPI + LangChain/LangGraph dependencies, and launches Uvicorn; `run_rust.sh` starts the Actix gateway.
+- `docs/` – Reference material (`architecture.md`) describing the Rust↔Python message flow, reliability patterns, and roadmap items.
+- `langgraph/` – Example LangGraph state machine (`graph.py`) that classifies intent, retrieves context, and generates answers. Use it as a scaffold for future agent orchestration work.
+
+---
+## 🛠️ Prerequisites
+
+- **Rust toolchain** with `cargo` (install via [rustup](https://rustup.rs/)).
+- **Python 3.10+** plus `pip`. The project installs dependencies from `python_ai/requirements.txt`.
+- **Anthropic access** (or a compatible Claude API key) for live answer generation. Without a key the service will raise `ANTHROPIC_API_KEY` errors when the pipeline is invoked.
+- Optional: a [Hugging Face](https://huggingface.co/) account if you want to cache the embedding model ahead of time; otherwise it downloads on first run.
+
+---
+## 🔑 Configuration
+
+Set these environment variables before launching services:
+
+- `ANTHROPIC_API_KEY` – Required by the Python RAG pipeline to call Claude.
+- `PYTHON_AI_URL` – Optional override used by the Rust gateway to locate the FastAPI service (`http://127.0.0.1:8001` by default).
+- `RUST_API_PORT` – Optional port for the Actix server (defaults to `8000`).
+
+The project intentionally omits `.env` files from version control—export secrets in your shell or use a local `.env` that stays untracked.
+
+---
+## 🗃️ Data & Caches
+
+- ChromaDB state persists under `python_ai/chroma_db/`. Remove this directory to clear stored documents and embeddings.
+- Hugging Face and sentence-transformer downloads are cached under your user cache directory (typically `~/.cache`). Clear them if you need a fresh model pull.
+- No virtual environments or `.env` files are committed; run `rm -rf python_ai/.venv rust_api/target` to reset local builds before publishing.
+
+---
+## ⚙️ Developer Utilities
+
+- Format Rust code with `cargo fmt` and Python code with `python3 -m black python_ai langgraph`.
+- `scripts/run_python.sh` and `scripts/run_rust.sh` wrap the standard startup flow so you can launch both services from the repo root.
+- `docs/architecture.md` captures the higher-level system design, security considerations, and future roadmap.
+- `langgraph/graph.py` demonstrates how to wire intent classification, retrieval, and answer generation into a LangGraph state machine—use `python langgraph/graph.py` to inspect the stubbed flow.
+- Automated tests are not yet included; validate changes by exercising the API via `curl` or the FastAPI `/docs` explorer.
 
 ---
 ## 🚀 Run the Services Locally
