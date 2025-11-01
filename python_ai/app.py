@@ -5,12 +5,16 @@ This service receives requests from the Rust gateway and performs
 retrieval‑augmented generation (RAG) to answer questions over indexed data.
 """
 
+import logging
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Dict, List, Optional
 
-from rag_pipeline import add_document, generate_answer
+from rag_pipeline import add_document, delete_document, generate_answer, update_document
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="EdgeLink AI Service",
@@ -225,6 +229,107 @@ async def home() -> HTMLResponse:
                     border-radius: 999px;
                     border: 1px solid rgba(148, 163, 184, 0.45);
                 }
+                .status-row {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.75rem;
+                    margin-top: 1.5rem;
+                }
+                .status-label {
+                    font-size: 0.85rem;
+                    letter-spacing: 0.08em;
+                    text-transform: uppercase;
+                    color: rgba(148, 163, 184, 0.75);
+                }
+                .status-indicator {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.55rem;
+                    background: rgba(15, 23, 42, 0.6);
+                    border-radius: 999px;
+                    padding: 0.35rem 0.85rem;
+                    border: 1px solid rgba(148, 163, 184, 0.25);
+                    font-weight: 600;
+                }
+                .status-dot {
+                    width: 10px;
+                    height: 10px;
+                    border-radius: 999px;
+                    background: #f87171;
+                    box-shadow: 0 0 10px rgba(248, 113, 113, 0.45);
+                    transition: background 180ms ease, box-shadow 180ms ease;
+                }
+                .status-indicator.up .status-dot {
+                    background: #34d399;
+                    box-shadow: 0 0 12px rgba(52, 211, 153, 0.5);
+                }
+                .chat-panel {
+                    margin-top: 2rem;
+                    display: grid;
+                    gap: 1rem;
+                }
+                .chat-form {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 0.85rem;
+                }
+                .chat-form input[type="text"] {
+                    flex: 1;
+                    min-width: 260px;
+                    border-radius: 14px;
+                    border: 1px solid rgba(148, 163, 184, 0.3);
+                    padding: 0.85rem 1.15rem;
+                    background: rgba(15, 23, 42, 0.6);
+                    color: var(--text);
+                    font-size: 1rem;
+                }
+                .chat-form input[type="text"]:focus {
+                    outline: none;
+                    border-color: rgba(56, 189, 248, 0.6);
+                    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+                }
+                .chat-form .ask-button {
+                    flex: 0 0 auto;
+                    padding: 0.85rem 1.6rem;
+                }
+                .chat-response {
+                    background: rgba(2, 6, 23, 0.75);
+                    border: 1px solid rgba(56, 189, 248, 0.25);
+                    border-radius: 16px;
+                    padding: 1.25rem;
+                    display: grid;
+                    gap: 0.75rem;
+                }
+                .chat-response h3 {
+                    margin: 0;
+                }
+                .chat-response h4 {
+                    margin: 0.25rem 0 0.5rem;
+                    color: rgba(148, 163, 184, 0.85);
+                    font-size: 0.95rem;
+                    letter-spacing: 0.04em;
+                }
+                .citations-list {
+                    list-style: none;
+                    margin: 0;
+                    padding: 0;
+                    display: grid;
+                    gap: 0.65rem;
+                }
+                .citation-item {
+                    border-radius: 12px;
+                    border: 1px solid rgba(148, 163, 184, 0.25);
+                    background: rgba(15, 23, 42, 0.6);
+                    padding: 0.75rem 1rem;
+                }
+                .citation-item strong {
+                    display: block;
+                    font-size: 0.8rem;
+                    letter-spacing: 0.08em;
+                    text-transform: uppercase;
+                    color: rgba(56, 189, 248, 0.9);
+                    margin-bottom: 0.35rem;
+                }
                 footer {
                     text-align: center;
                     padding: 2rem 1rem 3rem;
@@ -244,6 +349,13 @@ async def home() -> HTMLResponse:
                     }
                     .cta {
                         flex: 1;
+                    }
+                    .chat-form {
+                        flex-direction: column;
+                    }
+                    .chat-form .ask-button {
+                        width: 100%;
+                        justify-content: center;
                     }
                 }
             </style>
@@ -306,15 +418,40 @@ async def home() -> HTMLResponse:
                         </article>
                     </div>
                     <div id="console" class="console" style="display: none;">
-<pre><code>$ curl -X POST http://127.0.0.1:8000/api/ask \\
-    -H "Content-Type: application/json" \\
+<pre><code>$ curl -X POST http://127.0.0.1:8000/api/add_doc \
+    -H "Content-Type: application/json" \
+    -H "X-API-KEY: dev-key" \
+    -d '{ "text": "EdgeLink secures the gateway with Actix.", "metadata": { "source": "playbook" } }'
+
+$ curl -X POST http://127.0.0.1:8000/api/ask \
+    -H "Content-Type: application/json" \
+    -H "X-API-KEY: dev-key" \
     -d '{ "query": "How does EdgeLink secure the gateway?", "top_k": 4 }'
 
-Response:
-{
-    "answer": "EdgeLink uses a Rust gateway ... (stubbed)",
-    "citations": []
-}</code></pre>
+$ curl -X DELETE http://127.0.0.1:8001/delete_doc \
+    -H "Content-Type: application/json" \
+    -d '{ "document_id": "abc-123" }'</code></pre>
+                    </div>
+                    <div class="chat-panel">
+                        <div class="status-row">
+                            <span class="status-label">Service Status</span>
+                            <span id="status-indicator" class="status-indicator">
+                                <span class="status-dot"></span>
+                                <span id="status-text">Checking...</span>
+                            </span>
+                        </div>
+                        <form id="chat-form" class="chat-form">
+                            <input id="chat-input" type="text" placeholder="Ask a question" aria-label="Ask a question" required />
+                            <button type="submit" class="cta primary ask-button">Ask EdgeLink</button>
+                        </form>
+                        <div id="chat-response" class="chat-response" hidden>
+                            <h3>Answer</h3>
+                            <p id="answer-text">Ready to help—ask away!</p>
+                            <div id="citations-block" hidden>
+                                <h4>Citations</h4>
+                                <ul id="citations-list" class="citations-list"></ul>
+                            </div>
+                        </div>
                     </div>
                 </section>
             </main>
@@ -336,12 +473,101 @@ Response:
 
                 document.querySelector('footer').innerHTML =
                     document.querySelector('footer').innerHTML.replace('{year}', new Date().getFullYear());
+
+                const statusIndicator = document.getElementById('status-indicator');
+                const statusText = document.getElementById('status-text');
+                const statusDot = statusIndicator ? statusIndicator.querySelector('.status-dot') : null;
+
+                function setStatus(up) {
+                    if (!statusIndicator || !statusDot || !statusText) return;
+                    statusIndicator.classList.toggle('up', up);
+                    statusText.textContent = up ? 'Online' : 'Offline';
+                }
+
+                async function refreshHealth() {
+                    if (!statusIndicator) return;
+                    try {
+                        const resp = await fetch('/health');
+                        setStatus(resp.ok);
+                    } catch (error) {
+                        setStatus(false);
+                    }
+                }
+
+                refreshHealth();
+                setInterval(refreshHealth, 8000);
+
+                const chatForm = document.getElementById('chat-form');
+                const chatInput = document.getElementById('chat-input');
+                const chatResponse = document.getElementById('chat-response');
+                const answerText = document.getElementById('answer-text');
+                const citationsBlock = document.getElementById('citations-block');
+                const citationsList = document.getElementById('citations-list');
+                const askButton = chatForm ? chatForm.querySelector('button[type="submit"]') : null;
+
+                if (chatForm && chatInput && chatResponse && answerText && citationsBlock && citationsList && askButton) {
+                    const defaultButtonLabel = askButton.textContent;
+                    chatForm.addEventListener('submit', async (event) => {
+                        event.preventDefault();
+                        const query = chatInput.value.trim();
+                        if (!query) {
+                            chatInput.focus();
+                            return;
+                        }
+
+                        askButton.disabled = true;
+                        askButton.textContent = 'Thinking...';
+                        answerText.textContent = 'Thinking...';
+                        chatResponse.hidden = false;
+                        citationsBlock.hidden = true;
+
+                        try {
+                            const response = await fetch('/ask', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ query, top_k: 4 })
+                            });
+                            const data = await response.json().catch(() => ({}));
+                            if (!response.ok) {
+                                throw new Error(data.detail || 'Request failed');
+                            }
+                            answerText.textContent = data.answer || 'No answer returned.';
+
+                            const citations = Array.isArray(data.citations) ? data.citations : [];
+                            citationsList.innerHTML = '';
+                            if (citations.length > 0) {
+                                citations.forEach((citation, index) => {
+                                    const li = document.createElement('li');
+                                    li.className = 'citation-item';
+                                    const source = citation.source || `Source ${index + 1}`;
+                                    const text = citation.text || '';
+                                    li.innerHTML = `<strong>${source}</strong><span>${text}</span>`;
+                                    citationsList.appendChild(li);
+                                });
+                                citationsBlock.hidden = false;
+                            } else {
+                                citationsBlock.hidden = true;
+                            }
+                        } catch (error) {
+                            answerText.textContent = 'Service busy — try again soon!';
+                            citationsBlock.hidden = true;
+                        } finally {
+                            askButton.disabled = false;
+                            askButton.textContent = defaultButtonLabel;
+                        }
+                    });
+                }
             </script>
         </body>
         </html>
         """,
         status_code=200,
     )
+
+
+class Citation(BaseModel):
+    source: str
+    text: str
 
 
 class AskRequest(BaseModel):
@@ -351,7 +577,7 @@ class AskRequest(BaseModel):
 
 class AskResponse(BaseModel):
     answer: str
-    citations: List[str]
+    citations: List[Citation]
 
 
 class AddDocRequest(BaseModel):
@@ -363,6 +589,26 @@ class AddDocResponse(BaseModel):
     document_id: str
 
 
+class DeleteDocRequest(BaseModel):
+    document_id: str
+
+
+class DeleteDocResponse(BaseModel):
+    document_id: str
+    status: str = "deleted"
+
+
+class UpdateDocRequest(BaseModel):
+    document_id: str
+    text: str
+    metadata: Optional[Dict[str, str]] = None
+
+
+class UpdateDocResponse(BaseModel):
+    document_id: str
+    status: str = "updated"
+
+
 @app.post("/ask", response_model=AskResponse)
 async def ask_endpoint(req: AskRequest) -> AskResponse:
     """
@@ -370,12 +616,16 @@ async def ask_endpoint(req: AskRequest) -> AskResponse:
     """
     if not req.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
+
     try:
-        answer, citations = generate_answer(req.query, req.top_k or 4)
+        answer, citation_dicts = generate_answer(req.query, req.top_k or 4)
+        citations = [Citation(**citation) for citation in citation_dicts]
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:  # broad catch to provide a graceful fallback
+        logger.exception("RAG pipeline failed", exc_info=exc)
+        return AskResponse(answer="Service busy — try again soon!", citations=[])
+
     return AskResponse(answer=answer, citations=citations)
 
 
@@ -398,3 +648,27 @@ async def add_document_endpoint(req: AddDocRequest) -> AddDocResponse:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return AddDocResponse(document_id=document_id)
+
+
+@app.delete("/delete_doc", response_model=DeleteDocResponse)
+async def delete_document_endpoint(req: DeleteDocRequest) -> DeleteDocResponse:
+    """Remove a document from the vector store."""
+    if not req.document_id.strip():
+        raise HTTPException(status_code=400, detail="Document ID cannot be empty")
+    try:
+        delete_document(req.document_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return DeleteDocResponse(document_id=req.document_id)
+
+
+@app.put("/update_doc", response_model=UpdateDocResponse)
+async def update_document_endpoint(req: UpdateDocRequest) -> UpdateDocResponse:
+    """Update the stored contents of a document."""
+    if not req.text.strip():
+        raise HTTPException(status_code=400, detail="Document text cannot be empty")
+    try:
+        update_document(req.document_id, req.text, req.metadata)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return UpdateDocResponse(document_id=req.document_id)
